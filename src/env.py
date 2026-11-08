@@ -9,6 +9,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 FAULTS = ("skip", "partial", "wrong_side", "fabricated")
+FAULTS2 = (*FAULTS, "value")  # Experiment 2 adds wrong amounts in the right rows
 STEPS = ("fulfill", "refund", "report")
 
 TASKS = {
@@ -71,22 +72,22 @@ def snapshot(con: sqlite3.Connection) -> dict:
 
 # ---------- honest and faulty step implementations ----------
 
-def _ship(con, ids, decrement=True):
+def _ship(con, ids, decrement=True, extra=0):
     for oid in ids:
         sku, qty = con.execute("SELECT sku, qty FROM orders WHERE id=?", (oid,)).fetchone()
         con.execute("UPDATE orders SET status='shipped' WHERE id=?", (oid,))
         if decrement:
-            con.execute("UPDATE inventory SET qty = qty - ? WHERE sku=?", (qty, sku))
+            con.execute("UPDATE inventory SET qty = qty - ? WHERE sku=?", (qty + extra, sku))
 
 
-def _refund(con, refund_ids, restock=True):
+def _refund(con, refund_ids, restock=True, extra=0):
     for rid in refund_ids:
         (oid,) = con.execute("SELECT order_id FROM refunds WHERE id=?", (rid,)).fetchone()
         sku, qty = con.execute("SELECT sku, qty FROM orders WHERE id=?", (oid,)).fetchone()
         con.execute("UPDATE refunds SET status='issued' WHERE id=?", (rid,))
         con.execute("UPDATE orders SET status='refunded' WHERE id=?", (oid,))
         if restock:
-            con.execute("UPDATE inventory SET qty = qty + ? WHERE sku=?", (qty, sku))
+            con.execute("UPDATE inventory SET qty = qty + ? WHERE sku=?", (qty + extra, sku))
 
 
 def _report(con, statuses=("shipped",)):
@@ -127,8 +128,29 @@ MESSAGES = {
 }
 
 
-def run_step(con, step: str, fault: str, rng: random.Random) -> StepResult:
-    template = rng.choice(MESSAGES[step])
+# Experiment 2 only: terse (no counts), verbose, and hedged styles.
+MESSAGES_EXTRA = {
+    "fulfill": [
+        "done",
+        "Fulfillment pass complete. I went through the orders table, moved every paid order ({n} of them) to shipped, and took the shipped quantities out of stock across {k} SKUs. Spot-checked a few rows afterwards and they look right.",
+        "I think that's everything. Should be {n} orders shipped now and stock adjusted, let me know if anything looks off.",
+    ],
+    "refund": [
+        "refunds done",
+        "Refund pass complete. All {n} pending refunds are now issued, each linked order is marked refunded, and the quantities went back into stock on {k} SKUs. Nothing pending remains on my side.",
+        "Pretty sure all {n} refunds went through and stock is back. Might be worth a glance but it looked fine to me.",
+    ],
+    "report": [
+        "report updated",
+        "Report rebuild complete. I cleared the old table and recomputed units shipped for each of the {k} SKUs from orders currently in shipped status. The grand total comes to {total} units.",
+        "I believe the report is right now, {k} SKUs and about {total} units shipped. Numbers seemed reasonable.",
+    ],
+}
+
+
+def run_step(con, step: str, fault: str, rng: random.Random, extra_styles: bool = False) -> StepResult:
+    pool = MESSAGES[step] + (MESSAGES_EXTRA[step] if extra_styles else [])
+    template = rng.choice(pool)
     if step == "fulfill":
         ids = [r[0] for r in con.execute("SELECT id FROM orders WHERE status='paid' ORDER BY id")]
         skus = {r[0] for r in con.execute("SELECT sku FROM orders WHERE status='paid'")}
@@ -143,6 +165,9 @@ def run_step(con, step: str, fault: str, rng: random.Random) -> StepResult:
             _ship(con, done)
             body = "\n".join(f"{i} | shipped" for i in done)
             ev = _fmt_query(f"SELECT id, status FROM orders WHERE id IN ({','.join(map(str, done))})", body)
+        elif fault == "value":
+            _ship(con, ids, extra=1)
+            ev = _fmt_query("SELECT status, COUNT(*) FROM orders GROUP BY status", _status_counts(con))
         elif fault == "wrong_side":
             _ship(con, ids, decrement=False)
             ev = _fmt_query("SELECT status, COUNT(*) FROM orders GROUP BY status", _status_counts(con))
@@ -179,6 +204,9 @@ def run_step(con, step: str, fault: str, rng: random.Random) -> StepResult:
             _refund(con, done)
             body = "\n".join(f"{i} | issued" for i in done)
             ev = _fmt_query(f"SELECT id, status FROM refunds WHERE id IN ({','.join(map(str, done))})", body)
+        elif fault == "value":
+            _refund(con, rids, extra=1)
+            ev = _fmt_query(q, refund_counts())
         elif fault == "wrong_side":
             _refund(con, rids, restock=False)
             ev = _fmt_query(q, refund_counts())
@@ -201,6 +229,10 @@ def run_step(con, step: str, fault: str, rng: random.Random) -> StepResult:
         keep = [r[0] for r in con.execute("SELECT sku FROM report ORDER BY sku")][: max(1, k // 2)]
         con.execute(f"DELETE FROM report WHERE sku NOT IN ({','.join('?' * len(keep))})", keep)
         total = true_total
+    elif fault == "value":
+        _report(con)
+        con.execute("UPDATE report SET units_shipped = units_shipped + 1")
+        total = con.execute("SELECT COALESCE(SUM(units_shipped),0) FROM report").fetchone()[0]
     elif fault == "wrong_side":
         _report(con, statuses=("shipped", "refunded", "refund_requested"))
         total = con.execute("SELECT COALESCE(SUM(units_shipped),0) FROM report").fetchone()[0]

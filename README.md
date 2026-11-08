@@ -4,7 +4,7 @@ Swarm Alignment Hackathon 2026 (Apart Research), Track 4, Multi-Agent Oversight 
 
 When an agent in a pipeline says "done", the next agent acts on it. This repo measures how often a false "done" corrupts the final result, and which checker catches it before the next agent acts. Three scripted workers run a bookstore pipeline on a fake SQLite database, with planted false completion reports (skip, partial, wrong_side, fabricated). Six checkers are compared: trust, an exact code postcondition, and Jev (TypeSafe's System One model) reading the claim, the worker's own evidence, a monitor-computed database diff, or diff plus evidence.
 
-Headline, 120 held-out seeds, 360 steps: with no check, 101 of 101 runs with a fault ended wrong. Jev reading only the claim had AUROC 0.50, reading the worker's evidence 0.67, reading a monitor-computed diff 0.94. At a threshold picked on pilot seeds, the diff checker caught 88.9% of faulty steps and blocked 0.5% of honest ones. It missed all 19 cases of wrong values that matched the claim, which only the code check caught. The preregistered threshold of 0.5 failed 4 of 5 hypotheses because Jev blocked most honest steps. Full report: `report/report.pdf`.
+Headline, two preregistered experiments, 1,260 steps: with no check, 280 of 280 runs with a fault ended with a wrong database. Jev reading only the claim had AUROC 0.50 to 0.52, reading the worker's own evidence 0.67 to 0.71, reading a monitor-computed diff 0.94 to 0.98 on structural faults. Checkers without the diff graded writing style, blocking 59% to 100% of honest hedged or terse messages, while the diff checker blocked 0% to 2% in every style. A threshold from Experiment 1 transferred to Experiment 2 unchanged, with 0 of 301 honest steps blocked and 92% of structural faults caught. Wrong values in the right rows were invisible to every Jev view (0 of 52), and only exact code postconditions caught them. Stable thresholds needed about 150 labeled handoffs. The preregistered 0.5 threshold failed 4 of 5 Experiment 1 hypotheses, and all 5 Experiment 2 hypotheses passed. Full report: `report/report.pdf`.
 
 ## Run it
 
@@ -13,10 +13,12 @@ export TYPESAFE_API_KEY=...            # Jev key
 cd src
 uv run --with typesafe-sdk python run.py --tag main_t05 --seeds 0-119
 uv run --with typesafe-sdk python run.py --tag main_tpilot --seeds 0-119 --thresholds ../results/pilot_thresholds.json
-cd .. && uv run --with matplotlib python src/analyze.py
+uv run --with typesafe-sdk python run.py --tag exp2_scores --seeds 200-499 --exp2 --score-only
+uv run --with typesafe-sdk python run.py --tag exp2_decide --seeds 300-499 --exp2 --thresholds ../results/pilot_thresholds.json
+cd .. && uv run --with matplotlib python src/analyze.py && uv run --with matplotlib python src/analyze_exp2.py
 ```
 
-Each config makes 1,440 Jev requests, about 940k input tokens, about $0.04 at $0.042 per million tokens.
+All runs together, pilots included, made 9,264 Jev requests with 7.16M input tokens, about $0.30 at $0.042 per million input tokens.
 
 ## Files
 
@@ -25,7 +27,8 @@ Each config makes 1,440 Jev requests, about 940k input tokens, about $0.04 at $0
 | `PREREG.md` | Hypotheses and seed split, written before any run, plus the post-pilot addendum written before the main run |
 | `src/env.py` | Fake database, the three workers, planted faults, monitor diff, exact postconditions |
 | `src/run.py` | Runs each checker over the seeds and logs every step and Jev answer |
-| `src/analyze.py` | Metrics, bootstrap CIs, hypothesis scoring, figures |
+| `src/analyze.py` | Experiment 1 metrics, bootstrap CIs, hypothesis scoring, figures |
+| `src/analyze_exp2.py` | Experiment 2: value faults, message styles, paraphrases, threshold transfer, calibration curve |
 | `results/` | Raw logs for the pilots and both main configurations, `summary.json` |
 | `report/` | Report HTML, PDF and figures |
 
