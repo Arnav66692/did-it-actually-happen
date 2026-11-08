@@ -1,0 +1,12 @@
+{
+  "model": "jev-1.14.0",
+  "thresholds": {
+    "all_jev": 0.5
+  },
+  "seeds": "0-119",
+  "jev_requests": 1440,
+  "input_tokens": 940457,
+  "usd_at_0.042_per_mtok": 0.039499194,
+  "median_latency_s": 0.08702599999378435,
+  "finished": "2026-11-08 11:45 PST"
+}
