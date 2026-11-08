@@ -41,7 +41,7 @@ Hypotheses for Experiment 2 (scored on the test seeds, reported either way):
 - H9. Experiment 1's pilot threshold for monitor-diff Jev transfers. On the test seeds it blocks at most 5% of honest steps and catches at least 80% of non-value faults.
 - H10 (calibration cost). A threshold picked on 5 labeled calibration seeds (about 15 handoffs) gives a median held-out false-block rate of at most 10%.
 
-## Experiment 3, written 2026-11-08 15:30 PST, before any LLM-judge call
+## Experiment 3, written 2026-11-08 15:23 PST (commit 78d06bf), before any LLM-judge call
 
 Purpose: check whether the main findings come from Jev or from what the checker is shown. A frontier LLM judge (Claude Sonnet 5.5 through the Claude Code CLI, tools off, settings off, MCP off, no session saved) reads the same states Jev read.
 
